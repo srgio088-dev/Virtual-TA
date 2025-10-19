@@ -1,0 +1,9 @@
+flask
+flask_sqlalchemy
+flask_cors
+python-dotenv
+openai>=1.30.0
+pypdf
+python-docx
+gunicorn
+psycopg[binary]
