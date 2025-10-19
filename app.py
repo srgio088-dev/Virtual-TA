@@ -18,7 +18,7 @@ load_dotenv()
 
 DB_URL = os.getenv("DATABASE_URL", "sqlite:///virtualta.db")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
-FRONTEND_ORIGINS = [o.strip() for o in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")]
+#FRONTEND_ORIGINS = [o.strip() for o in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")]
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -30,7 +30,10 @@ app.config["SQLALCHEMY_TRACKING_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB
 
-CORS(app, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
+# Enable CORS for your frontend (Netlify + local dev)
+CORS(app,
+     supports_credentials=True,
+     origins=os.getenv("FRONTEND_ORIGINS", "").split(","))
 db = SQLAlchemy(app)
 client = OpenAI(api_key=OPENAI_API_KEY)
 
