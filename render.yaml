@@ -20,4 +20,3 @@ services:
         value: https://<your-netlify>.netlify.app
       - key: MAX_CONTENT_LENGTH
         value: "33554432"
-    postDeployCommand: python -m alembic upgrade head
