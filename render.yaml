@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: virtual-ta-backend
+    env: python
+    rootDir: virtual-ta-backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app -w 3 -k gthread -t 120 -b 0.0.0.0:$PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.5
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGINS
+        value: https://<your-netlify>.netlify.app
+      - key: MAX_CONTENT_LENGTH
+        value: "33554432"
+    postDeployCommand: python -m alembic upgrade head
