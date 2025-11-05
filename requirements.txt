@@ -9,3 +9,5 @@ pypdf
 python-docx
 gunicorn
 psycopg[binary]
+python-jose[cryptography]
+requests
