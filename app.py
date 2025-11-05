@@ -250,18 +250,26 @@ def create_assignment():
 
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
-    a = Assignment.query.get(aid)
-    if not a:
-        return jsonify({"error": "assignment not found"}), 404
+    try:
+        # Prefer session.get (SQLAlchemy 2.x) but fallback to query.get if needed
+        a = getattr(db.session, "get", None)
+        a = a(Assignment, aid) if a else Assignment.query.get(aid)
 
-    # Defensive: handle both possible field names
-    rubric_value = getattr(a, "rubric", None) or getattr(a, "rubric_text", None)
+        if not a:
+            return jsonify({"error": "assignment not found"}), 404
 
-    return jsonify({
-        "id": a.id,
-        "name": a.name,
-        "rubric": rubric_value
-    })
+        # Be flexible about the rubric field name
+        rubric_value = getattr(a, "rubric", None) or getattr(a, "rubric_text", None)
+
+        return jsonify({
+            "id": a.id,
+            "name": a.name,
+            "rubric": rubric_value
+        })
+    except Exception as e:
+        # Log full stacktrace to Gunicorn error log
+        app.logger.exception("GET /api/assignments/%s failed", aid)
+        return jsonify({"error": "internal", "detail": str(e)}), 500
 
 @app.patch("/api/assignments/<int:aid>")
 def update_assignment(aid):
