@@ -248,18 +248,19 @@ def create_assignment():
     db.session.commit()
     return jsonify({"id": a.id, "name": a.name}), 201
 
-@app.route("/api/assignments/<int:id>", methods=["GET"])
-def get_assignment(id):
-    from models import Assignment  # adjust if your model import is different
+@app.get("/api/assignments/<int:aid>")
+def get_assignment(aid):
+    a = Assignment.query.get(aid)
+    if not a:
+        return jsonify({"error": "assignment not found"}), 404
 
-    assignment = Assignment.query.get(id)
-    if not assignment:
-        return jsonify({"error": "Assignment not found"}), 404
+    # Defensive: handle both possible field names
+    rubric_value = getattr(a, "rubric", None) or getattr(a, "rubric_text", None)
 
     return jsonify({
-        "id": assignment.id,
-        "name": assignment.name,
-        "rubric": assignment.rubric
+        "id": a.id,
+        "name": a.name,
+        "rubric": rubric_value
     })
 
 @app.patch("/api/assignments/<int:aid>")
