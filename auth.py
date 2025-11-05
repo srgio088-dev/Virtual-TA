@@ -1,58 +1,52 @@
 # auth.py
-import os, requests
-from functools import wraps
-from flask import request, jsonify, g
-from jose import jwk, jwt
-from jose.utils import base64url_decode
+import os
+import functools
+import requests
+from flask import request, g, jsonify
 
-# Your Netlify site Identity endpoints
-NETLIFY_ISSUER = os.getenv(
-    "NETLIFY_ISSUER",
-    "https://virtualteacher.netlify.app/.netlify/identity"
-)
-NETLIFY_JWKS = os.getenv(
-    "NETLIFY_JWKS",
-    "https://virtualteacher.netlify.app/.netlify/identity/.well-known/jwks.json"
-)
+NETLIFY_ISSUER = os.getenv("NETLIFY_ISSUER", "").rstrip("/")
 
-# Cache the JWKS keys on import
-_JWKS = requests.get(NETLIFY_JWKS, timeout=10).json().get("keys", [])
+def _bearer_token(auth_header: str) -> str | None:
+    if not auth_header:
+        return None
+    parts = auth_header.strip().split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    return None
 
-def _verify_netlify_jwt(token: str):
-    # Verify signature using JWKS
-    headers = jwt.get_unverified_header(token)
-    kid = headers.get("kid")
-    key_data = next((k for k in _JWKS if k.get("kid") == kid), None)
-    if not key_data:
-        raise Exception("Unknown key id")
+def _fetch_netlify_user(token: str) -> dict:
+    """Ask Netlify Identity to validate the token and return the user JSON."""
+    url = f"{NETLIFY_ISSUER}/user"
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    if resp.status_code != 200:
+        raise ValueError(f"Identity /user status {resp.status_code}")
+    data = resp.json()  # contains email, app_metadata.roles, etc.
+    roles = (data.get("app_metadata") or {}).get("roles") or []
+    return {
+        "id": data.get("id"),
+        "email": data.get("email"),
+        "roles": roles,
+        "raw": data,
+    }
 
-    key = jwk.construct(key_data)
-    signing_input, crypto_segment = token.rsplit(".", 1)
-    decoded_sig = base64url_decode(crypto_segment.encode())
-    if not key.verify(signing_input.encode(), decoded_sig):
-        raise Exception("Invalid signature")
-
-    claims = jwt.get_unverified_claims(token)
-    if claims.get("iss") != NETLIFY_ISSUER:
-        raise Exception("Invalid issuer")
-    return claims
-
-def require_professor(f):
-    @wraps(f)
+def require_professor(view_fn):
+    """Decorator that requires a valid Netlify Identity token with role 'professor' or 'admin'."""
+    @functools.wraps(view_fn)
     def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            return jsonify({"error": "missing token"}), 401
-        token = auth.split()[1]
+        token = _bearer_token(request.headers.get("Authorization"))
+        if not token:
+            return jsonify({"error": "missing bearer token"}), 401
         try:
-            claims = _verify_netlify_jwt(token)
-            roles = (claims.get("app_metadata") or {}).get("roles") or []
-            if "professor" not in roles:
-                return jsonify({"error": "forbidden"}), 403
-            # expose identity for handlers
-            g.user_id = claims.get("sub")
-            g.email = claims.get("email")
+            user = _fetch_netlify_user(token)
         except Exception as e:
             return jsonify({"error": "invalid token", "detail": str(e)}), 401
-        return f(*args, **kwargs)
+
+        roles = set(r.lower() for r in user["roles"])
+        if "professor" not in roles and "admin" not in roles:
+            return jsonify({"error": "forbidden: professor role required"}), 403
+
+        # Stash on flask.g for downstream use
+        g.user = user
+        g.email = user["email"]
+        return view_fn(*args, **kwargs)
     return wrapper
