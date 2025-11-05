@@ -1,12 +1,11 @@
 import os, json, datetime
 from pathlib import Path
-
+from auth import require_professor
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-
 from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
