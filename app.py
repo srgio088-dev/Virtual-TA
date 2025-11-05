@@ -32,7 +32,7 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB
 # Enable CORS for your frontend (Netlify + local dev)
 CORS(app,
      supports_credentials=True,
-     origins=os.getenv("FRONTEND_ORIGINS", "").split(","))
+     origins=os.getenv("FRONTEND_ORIGINS", "https://virtualteacher.netlify.app").split(","))
 db = SQLAlchemy(app)
 client = OpenAI(api_key=OPENAI_API_KEY)
 
