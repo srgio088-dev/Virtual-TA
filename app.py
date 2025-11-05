@@ -248,6 +248,20 @@ def create_assignment():
     db.session.commit()
     return jsonify({"id": a.id, "name": a.name}), 201
 
+@app.route("/api/assignments/<int:id>", methods=["GET"])
+def get_assignment(id):
+    from models import Assignment  # adjust if your model import is different
+
+    assignment = Assignment.query.get(id)
+    if not assignment:
+        return jsonify({"error": "Assignment not found"}), 404
+
+    return jsonify({
+        "id": assignment.id,
+        "name": assignment.name,
+        "rubric": assignment.rubric
+    })
+
 @app.patch("/api/assignments/<int:aid>")
 def update_assignment(aid):
     a = Assignment.query.get(aid)
