@@ -1,6 +1,7 @@
 import os, json, datetime
 from pathlib import Path
 from auth import require_professor
+from pins import bp as pins_bp
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
@@ -9,6 +10,8 @@ from werkzeug.utils import secure_filename
 from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
+
+
 
 # =========================
 # Config
@@ -35,6 +38,9 @@ CORS(app,
      origins=os.getenv("FRONTEND_ORIGINS", "https://virtualteacher.netlify.app").split(","))
 db = SQLAlchemy(app)
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Register PIN routes
+app.register_blueprint(pins_bp)
 
 # =========================
 # Models
