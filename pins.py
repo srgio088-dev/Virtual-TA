@@ -1,6 +1,6 @@
-from flask import Blueprint, request
-from app import db
-from models.submission_pin import SubmissionPin
+from flask import Blueprint, request, jsonify  # whatever else you use
+from extensions import db                     # ✅ NOT from app
+#from models.submission_pin import SubmissionPin
 
 bp = Blueprint("pins", __name__)
 
