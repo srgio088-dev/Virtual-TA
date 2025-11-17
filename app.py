@@ -236,11 +236,6 @@ def delete_rubric(rid):
     return jsonify({"ok": True})
 
 # ----- Assignments -----
-@app.get("/api/assignments")
-def get_assignments():
-    items = Assignment.query.order_by(Assignment.created_at.desc()).all()
-    return jsonify([assignment_to_dict(a) for a in items])
-
 @app.post("/api/assignments")
 def create_assignment():
     data = request.get_json(force=True)
@@ -248,14 +243,21 @@ def create_assignment():
     rubric_text = (data or {}).get("rubric")      # optional free-text
     rubric_id = (data or {}).get("rubric_id")     # optional FK
 
+    # basic validation
     if not name or (not rubric_text and not rubric_id):
         return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
 
     a = Assignment(name=name.strip())
+
+    # sanitize rubric text in case it came from a binary file (PDF, etc.)
     if rubric_text:
-        a.rubric = rubric_text.strip()
+        # make sure it's a string and strip out null bytes that break Postgres
+        safe_rubric = str(rubric_text).replace("\x00", "")
+        a.rubric = safe_rubric.strip()
+
     if rubric_id:
         a.rubric_id = int(rubric_id)
+
     db.session.add(a)
     db.session.commit()
     return jsonify({"id": a.id, "name": a.name}), 201
