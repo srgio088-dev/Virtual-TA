@@ -115,7 +115,7 @@ def assignment_to_dict(a: Assignment) -> dict:
         "rubric": a.rubric,                 # legacy free-text rubric (if present)
         "rubric_id": a.rubric_id,           # FK to Rubric (if set)
         "submission_count": len(a.submissions),
-        "submissions": [s.to_dict_full() for s in a.submissions], //CHANGED TO FULL FROM SHORT
+        "submissions": [s.to_dict_full() for s in a.submissions], #CHANGED TO FULL FROM SHORT
         "created_at": a.created_at.isoformat(),
     }
 
