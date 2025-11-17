@@ -1,17 +1,15 @@
 import os, json, datetime
 from pathlib import Path
+
 from auth import require_professor
-from pins import bp as pins_bp
-from dotenv import load_dotenv
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
+from extensions import db              # ✅ shared SQLAlchemy instance
+from dotenv import load_dotenv
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
-
-
 
 # =========================
 # Config
@@ -20,7 +18,6 @@ load_dotenv()
 
 DB_URL = os.getenv("DATABASE_URL", "sqlite:///virtualta.db")
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
-#FRONTEND_ORIGINS = [o.strip() for o in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")]
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -28,18 +25,28 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URL
-app.config["SQLALCHEMY_TRACKING_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32MB
 
 # Enable CORS for your frontend (Netlify + local dev)
-CORS(app,
-     supports_credentials=True,
-     origins=os.getenv("FRONTEND_ORIGINS", "https://virtualteacher.netlify.app").split(","))
-db = SQLAlchemy(app)
+CORS(
+    app,
+    supports_credentials=True,
+    origins=os.getenv(
+        "FRONTEND_ORIGINS",
+        "https://virtualteacher.netlify.app"
+    ).split(","),
+)
+
+# ✅ initialize db with the app (using extensions.db)
+db.init_app(app)
+
+# ✅ create OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Register PIN routes
+# ✅ NOW import and register the blueprint (no circular import)
+from pins import bp as pins_bp
 app.register_blueprint(pins_bp)
 
 # =========================
