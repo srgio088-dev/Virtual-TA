@@ -61,8 +61,9 @@ class Assignment(db.Model):
     __tablename__ = "assignments"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(180), nullable=False)
-    rubric = db.Column(db.Text, nullable=True)  # keep legacy free-text rubric
-    rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)  # reference saved rubric
+    rubric = db.Column(db.Text, nullable=True) 
+    rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
+    due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     submissions = db.relationship(
         "Submission",
@@ -124,10 +125,11 @@ def assignment_to_dict(a: Assignment) -> dict:
     return {
         "id": a.id,
         "name": a.name,
-        "rubric": a.rubric,                 # legacy free-text rubric (if present)
-        "rubric_id": a.rubric_id,           # FK to Rubric (if set)
+        "rubric": a.rubric,
+        "rubric_id": a.rubric_id,
+        "due_date": a.due_date.isoformat() if a.due_date else None, #NEW 11/19
         "submission_count": len(a.submissions),
-        "submissions": [s.to_dict_full() for s in a.submissions], #CHANGED TO FULL FROM 
+        "submissions": [s.to_dict_full() for s in a.submissions],
         "created_at": a.created_at.isoformat(),
     }
 
@@ -250,8 +252,9 @@ def get_assignments():
 def create_assignment():
     data = request.get_json(force=True)
     name = (data or {}).get("name")
-    rubric_text = (data or {}).get("rubric")      # optional free-text
-    rubric_id = (data or {}).get("rubric_id")     # optional FK
+    rubric_text = (data or {}).get("rubric")
+    rubric_id = (data or {}).get("rubric_id")
+    due_date_raw = (data or {}).get("due_date")  # NEW 11/19
 
     if not name or (not rubric_text and not rubric_id):
         return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
@@ -261,6 +264,17 @@ def create_assignment():
         a.rubric = rubric_text.strip()
     if rubric_id:
         a.rubric_id = int(rubric_id)
+
+    #NEW 11/19 
+    parse incoming ISO timestamp if provided
+    if due_date_raw:
+        try:
+            # handle trailing Z by replacing with +00:00 for Python 3.11+ or use fromisoformat
+            a.due_date = datetime.datetime.fromisoformat(due_date_raw.replace("Z", "+00:00"))
+        except Exception:
+            # try fallback: if you want stricter validation, return 400 instead
+            return jsonify({"error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"}), 400 #ALL ABOVE IS NEW 11/19
+    
     db.session.add(a)
     db.session.commit()
     return jsonify({"id": a.id, "name": a.name}), 201
@@ -287,6 +301,24 @@ def get_assignment(aid):
         # Log full stacktrace to Gunicorn error log
         app.logger.exception("GET /api/assignments/%s failed", aid)
         return jsonify({"error": "internal", "detail": str(e)}), 500
+# =================================================
+#    OLD CODE 11/19
+
+#@app.patch("/api/assignments/<int:aid>")
+#def update_assignment(aid):
+#    a = Assignment.query.get(aid)
+#    if not a:
+#        return jsonify({"error": "assignment not found"}), 404
+#    data = request.get_json(force=True)
+#    if "name" in data:
+#        a.name = (data["name"] or "").strip()
+#    if "rubric" in data:
+#        a.rubric = (data["rubric"] or "").strip()
+#    if "rubric_id" in data:
+#        a.rubric_id = int(data["rubric_id"]) if data["rubric_id"] is not None else None
+#    db.session.commit()
+#   return jsonify({"ok": True})
+#==================================================
 
 @app.patch("/api/assignments/<int:aid>")
 def update_assignment(aid):
@@ -300,8 +332,21 @@ def update_assignment(aid):
         a.rubric = (data["rubric"] or "").strip()
     if "rubric_id" in data:
         a.rubric_id = int(data["rubric_id"]) if data["rubric_id"] is not None else None
+
+    # NEW: due_date handling
+    if "due_date" in data:
+        raw = data["due_date"]
+        if raw is None or raw == "":
+            a.due_date = None
+        else:
+            try:
+                a.due_date = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except Exception:
+                return jsonify({"error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"}), 400
+
     db.session.commit()
     return jsonify({"ok": True})
+
 
 @app.delete("/api/assignments/<int:aid>")
 def delete_assignment(aid):
