@@ -61,7 +61,9 @@ class Assignment(db.Model):
     __tablename__ = "assignments"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(180), nullable=False)
-    rubric = db.Column(db.Text, nullable=True) 
+    rubric = db.Column(db.Text, nullable=True)
+    # NEW: which professor owns this assignment
+    owner_email = db.Column(db.String, nullable=True)
     rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
     due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
