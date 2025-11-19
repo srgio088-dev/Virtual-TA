@@ -44,6 +44,9 @@ CORS(
 # ✅ initialize db with the app (using extensions.db)
 db.init_app(app)
 
+# ✅ ADD THIS LINE (required for flask db migrate/upgrade)
+migrate = Migrate(app, db)
+
 # ✅ create OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
