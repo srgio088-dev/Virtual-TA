@@ -10,6 +10,8 @@ from werkzeug.utils import secure_filename
 from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
+from flask_migrate import Migrate 
+
 
 # =========================
 # Config
