@@ -124,12 +124,16 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def assignment_to_dict(a: Assignment) -> dict:
+    if isinstance(a.due_date, datetime.datetime):
+        due = a.due_date.isoformat()
+    else:
+        due = None
     return {
         "id": a.id,
         "name": a.name,
         "rubric": a.rubric,
         "rubric_id": a.rubric_id,
-        "due_date": a.due_date.isoformat() if a.due_date else None, #NEW 11/19
+        "due_date": due, #NEW 11/19
         "submission_count": len(a.submissions),
         "submissions": [s.to_dict_full() for s in a.submissions],
         "created_at": a.created_at.isoformat(),
