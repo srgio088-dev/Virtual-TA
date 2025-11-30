@@ -39,31 +39,50 @@ def make_pin(class_id, assignment_id, student_id):
 # =========================
 @bp.post("/api/pins")
 def create_pin():
-    # Parse JSON safely
+    """
+    Create a PIN for a given class_id + assignment_id (+ optional student_id).
+
+    This version is VERY forgiving:
+      - Tries JSON first, then falls back to form data.
+      - Defaults assignment_id / student_id to 0 if missing or invalid.
+      - Defaults class_id to "0000" if missing.
+      - Never returns 400 just because the payload is slightly off.
+    """
+    # Try to read JSON without exploding
     try:
-        data = request.get_json(force=True) or {}
+        data = request.get_json(silent=True) or {}
     except Exception:
-        return jsonify({"error": "Invalid JSON body"}), 400
+        data = {}
 
-    class_id = str(data.get("class_id", "")).strip()
-    assignment_id = data.get("assignment_id")
-    student_id = data.get("student_id", 0)
+    # Fallback to form data if no JSON
+    if not data and request.form:
+        data = request.form.to_dict()
 
-    # Basic validation
-    if not class_id or assignment_id is None:
-        return jsonify({"error": "class_id and assignment_id are required"}), 400
+    # Pull values out, but be forgiving
+    class_id = (data.get("class_id") or "").strip()
+    assignment_id_raw = data.get("assignment_id")
+    student_id_raw = data.get("student_id", 0)
+
+    # Try to coerce to ints; if that fails, just default to 0
+    try:
+        assignment_id = int(assignment_id_raw) if assignment_id_raw is not None else 0
+    except (TypeError, ValueError):
+        assignment_id = 0
 
     try:
-        assignment_id = int(assignment_id)
-        student_id = int(student_id)
-    except ValueError:
-        return jsonify({"error": "assignment_id and student_id must be integers"}), 400
+        student_id = int(student_id_raw) if student_id_raw is not None else 0
+    except (TypeError, ValueError):
+        student_id = 0
+
+    # If class_id is blank, still generate *something*
+    if not class_id:
+        class_id = "0000"
 
     # Build the PIN string
     pin = make_pin(class_id, assignment_id, student_id)
 
-    # Try to save / reuse without crashing
     try:
+        # Reuse existing PIN if it already exists
         existing = SubmissionPin.query.filter_by(pin=pin).first()
         if existing:
             return jsonify({"pin": existing.pin}), 200
@@ -79,8 +98,8 @@ def create_pin():
         return jsonify({"pin": new_pin.pin}), 201
 
     except Exception as e:
-        # Log the error but still return the pin so the UI keeps working
-        current_app.logger.exception("Failed to save PIN in database")
+        # If DB save fails, log it but STILL return the PIN so the UI works
+        current_app.logger.exception("Failed to save PIN")
         return jsonify({
             "pin": pin,
             "warning": "PIN generated but not saved to DB.",
