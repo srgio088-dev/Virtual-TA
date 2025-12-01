@@ -1,71 +1,46 @@
 from flask import Blueprint, request, jsonify
+from models import db, Pin  # adjust import if needed
 
-bp = Blueprint("pins", __name__)
+pins_bp = Blueprint("pins", __name__)
 
-
-# =========================
-# Helper
-# =========================
-def make_pin(class_id, assignment_id, student_id=0):
-    """
-    Build a PIN from:
-      - class_id: 4-digit string like "3880"
-      - assignment_id: int
-      - student_id: int (optional, default 0)
-
-    Example: "3880" + "01" + "00" => "38800100"
-    """
-    cls = str(class_id).zfill(4)              # 4 digits (e.g., 3880)
-    try:
-        aid = f"{int(assignment_id):02d}"     # 2 digits (01, 02, 10, ...)
-    except (TypeError, ValueError):
-        aid = "00"
-
-    try:
-        sid = f"{int(student_id):02d}"        # 2 digits
-    except (TypeError, ValueError):
-        sid = "00"
-
-    return f"{cls}{aid}{sid}"
-
-
-# =========================
-# Routes
-# =========================
-@bp.post("/api/pins")
+@pins_bp.route("/api/pins", methods=["POST"])
 def create_pin():
-    """
-    Create a PIN for a given class_id + assignment_id (+ optional student_id).
+    data = request.get_json() or {}
 
-    This version:
-      - Does NOT use the database at all (no table errors, no migrations needed).
-      - Tries JSON first; if that fails, falls back to form data.
-      - Always returns a JSON with a 'pin' field (HTTP 200).
-    """
-    # Try to read JSON safely
-    data = request.get_json(silent=True)
-    if not data:
-        # Fallback: try form data (just in case)
-        data = request.form.to_dict() if request.form else {}
+    # assignment_id: required, must be an integer
+    raw_assignment_id = data.get("assignment_id")
+    try:
+        assignment_id = int(raw_assignment_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "assignment_id is required and must be an integer"}), 400
 
-    class_id = (data.get("class_id") or "").strip()
-    assignment_id = data.get("assignment_id")
-    student_id = data.get("student_id", 0)
+    # class_id: optional, integer if provided
+    raw_class_id = data.get("class_id")
+    class_id = None
+    if raw_class_id not in (None, ""):
+        try:
+            class_id = int(raw_class_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "class_id must be an integer if provided"}), 400
 
-    # If class_id somehow missing, still produce something
-    if not class_id:
-        class_id = "0000"
+    # pin_code: required string
+    pin_code = (data.get("pin_code") or "").strip()
+    if not pin_code:
+        return jsonify({"error": "pin_code is required"}), 400
 
-    pin = make_pin(class_id, assignment_id, student_id)
+    # Create and save the pin
+    pin = Pin(
+        assignment_id=assignment_id,
+        class_id=class_id,
+        pin_code=pin_code,
+    )
+    db.session.add(pin)
+    db.session.commit()
 
-    return jsonify({"pin": pin}), 200
-
-
-@bp.get("/api/pins/<pin>")
-def resolve_pin(pin):
-    """
-    Simple echo endpoint — in a more advanced version we could
-    decode class_id / assignment_id back out from the pin string.
-    For now, just return the raw pin.
-    """
-    return jsonify({"pin": pin}), 200
+    # Return something the frontend can use
+    return jsonify(pin.to_dict() if hasattr(pin, "to_dict") else {
+        "id": pin.id,
+        "assignment_id": pin.assignment_id,
+        "class_id": pin.class_id,
+        "pin_code": pin.pin_code,
+    }), 201
