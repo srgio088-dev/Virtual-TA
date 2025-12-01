@@ -2,19 +2,21 @@
 
 from flask import Blueprint, request, jsonify
 from extensions import db  # same place app.py gets db from
+import random
+import string
 
 bp = Blueprint("pins", __name__)
 
 # ---------- MODEL ----------
 
 class Pin(db.Model):
-    __tablename__ = "pins"  # change if you use a different naming style
+    __tablename__ = "pins"  # matches your existing table name
 
     id = db.Column(db.Integer, primary_key=True)
-    # Assumes you already have an Assignment model with table name "assignments" and PK "id"
     assignment_id = db.Column(db.Integer, nullable=False)
     class_id = db.Column(db.Integer, nullable=True)
     pin_code = db.Column(db.String(32), unique=True, nullable=False)
+    # NOTE: your current DB table doesn't have student_id, so we are NOT storing it yet.
 
     def to_dict(self):
         return {
@@ -25,6 +27,14 @@ class Pin(db.Model):
         }
 
 
+# ---------- HELPERS ----------
+
+def generate_pin_code(length: int = 6) -> str:
+    """Generate a random alphanumeric PIN code."""
+    chars = string.ascii_uppercase + string.digits
+    return "".join(random.choice(chars) for _ in range(length))
+
+
 # ---------- ROUTES ----------
 
 @bp.route("/api/pins", methods=["POST"])
@@ -32,19 +42,26 @@ def create_pin():
     """
     Create a new PIN for an assignment.
 
-    Expects JSON like:
+    Frontend is currently sending JSON like:
     {
-      "assignment_id": 3,        # required (int or string that can be cast to int)
-      "pin_code": "ABC123",      # required (string)
-      "class_id": 1              # optional (int or string)
+      "class_id": 4850,
+      "assignment_id": 2,
+      "student_id": "Jed Cooper"
     }
+
+    This endpoint will:
+    - Read assignment_id and class_id
+    - Ignore student_id for now (DB schema doesn't have it yet)
+    - Auto-generate a pin_code if one is not provided
     """
     data = request.get_json() or {}
 
+    # print("DEBUG /api/pins data:", data, flush=True)  # uncomment if you want to see payload in logs
+
     # --- assignment_id: required, must be an integer ---
-    raw_assignment_id = data.get("assignment_id")
+    raw_assignment_id = data.get("assignment_id") or data.get("assignmentId")
     if raw_assignment_id is None:
-        return jsonify({"error": "assignment_id is required"}), 400
+        return jsonify({"error": "assignment_id (or assignmentId) is required"}), 400
 
     try:
         assignment_id = int(raw_assignment_id)
@@ -52,7 +69,7 @@ def create_pin():
         return jsonify({"error": "assignment_id must be an integer"}), 400
 
     # --- class_id: optional, integer if provided ---
-    raw_class_id = data.get("class_id")
+    raw_class_id = data.get("class_id") or data.get("classId")
     class_id = None
     if raw_class_id not in (None, ""):
         try:
@@ -60,15 +77,21 @@ def create_pin():
         except (TypeError, ValueError):
             return jsonify({"error": "class_id must be an integer if provided"}), 400
 
-    # --- pin_code: required string ---
-    pin_code = (data.get("pin_code") or "").strip()
-    if not pin_code:
-        return jsonify({"error": "pin_code is required"}), 400
+    # --- student_id: currently ignored (no column yet), but we accept it ---
+    student_id = data.get("student_id") or data.get("studentId")
+    # You can log it if you want:
+    # print("DEBUG student_id:", student_id, flush=True)
 
-    # Optional: prevent duplicate pin codes
-    existing = Pin.query.filter_by(pin_code=pin_code).first()
-    if existing:
-        return jsonify({"error": "A PIN with this code already exists"}), 409
+    # --- pin_code: optional string; auto-generate if missing ---
+    raw_pin_code = data.get("pin_code") or data.get("pinCode")
+    if raw_pin_code:
+        pin_code = str(raw_pin_code).strip()
+    else:
+        # Auto-generate a unique PIN
+        pin_code = generate_pin_code()
+        # Ensure uniqueness
+        while Pin.query.filter_by(pin_code=pin_code).first() is not None:
+            pin_code = generate_pin_code()
 
     # --- create and save Pin ---
     pin = Pin(
