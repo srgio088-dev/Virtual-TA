@@ -31,8 +31,12 @@ class Pin(db.Model):
 
 def generate_pin_code(length: int = 6) -> str:
     """Generate a random numeric PIN code (e.g., 483920)."""
+    import random
+    import string
+
     digits = string.digits  # "0123456789"
     return "".join(random.choice(digits) for _ in range(length))
+
 
 
 
