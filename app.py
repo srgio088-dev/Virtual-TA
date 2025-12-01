@@ -163,6 +163,37 @@ def extract_text(file_path: str) -> str:
         return "\n".join(p.text for p in doc.paragraphs)
     return ""
 
+def extract_rubric_from_upload(file_storage):
+    """
+    Return plain text from an uploaded rubric file (PDF, DOCX, or TXT).
+    Expects a Werkzeug FileStorage object (request.files[...] item).
+    """
+    if not file_storage:
+        return ""
+
+    filename = (file_storage.filename or "").lower()
+    ext = os.path.splitext(filename)[1]
+
+    # PDF -> use PdfReader
+    if ext == ".pdf":
+        parts = []
+        reader = PdfReader(file_storage)
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")
+        return "\n\n".join(parts).strip()
+
+    # DOCX/DOC -> python-docx
+    if ext in (".docx", ".doc"):
+        doc = Document(file_storage)
+        return "\n".join(p.text for p in doc.paragraphs).strip()
+
+    # Fallback -> treat as plain text
+    data = file_storage.read()
+    try:
+        return data.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return data.decode("latin-1", errors="ignore").strip()
+
 def grade_with_openai(submission_text: str, rubric_text: str) -> tuple[str, str]:
     """
     Returns (feedback, grade_str). On API/quota error, returns ("[AI error ...]", "Pending").
