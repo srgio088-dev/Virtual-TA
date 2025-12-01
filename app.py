@@ -287,35 +287,71 @@ def get_assignments():
 
 @app.post("/api/assignments")
 def create_assignment():
-    data = request.get_json(force=True)
-    name = (data or {}).get("name")
-    rubric_text = (data or {}).get("rubric")
-    rubric_id = (data or {}).get("rubric_id")
-    due_date_raw = (data or {}).get("due_date")  # NEW 11/19
+    """
+    Create a single assignment.
 
+    Supports:
+      - JSON (existing behavior), or
+      - multipart/form-data with an uploaded rubric_file (PDF/DOCX/TXT).
+    """
+    content_type = request.content_type or ""
+
+    # ---- multipart/form-data path (rubric_file upload) ----
+    if content_type.startswith("multipart/form-data"):
+        form = request.form
+        name = (form.get("name") or "").strip()
+        rubric_text = (form.get("rubric") or "").strip()
+        rubric_id = form.get("rubric_id")
+        due_date_raw = form.get("due_date")
+
+        rubric_file = request.files.get("rubric_file")
+        # If no text rubric provided, try to read from uploaded file
+        if rubric_file and not rubric_text:
+            rubric_text = extract_rubric_from_upload(rubric_file)
+
+    # ---- JSON path (no file) ----
+    else:
+        data = request.get_json(force=True) or {}
+        name = (data.get("name") or "").strip()
+        rubric_text = (data.get("rubric") or "").strip()
+        rubric_id = data.get("rubric_id")
+        due_date_raw = data.get("due_date")
+
+    # Basic validation
     if not name or (not rubric_text and not rubric_id):
-        return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
+        return (
+            jsonify(
+                {"error": "name and either rubric (text/file) or rubric_id are required"}
+            ),
+            400,
+        )
 
-    a = Assignment(name=name.strip())
+    a = Assignment(name=name)
     if rubric_text:
-        a.rubric = rubric_text.strip()
+        a.rubric = rubric_text
     if rubric_id:
         a.rubric_id = int(rubric_id)
 
-    #NEW 11/19 
-    #parse incoming ISO timestamp if provided
+    # Due date (same behavior as before)
     if due_date_raw:
         try:
-            # handle trailing Z by replacing with +00:00 for Python 3.11+ or use fromisoformat
-            a.due_date = datetime.datetime.fromisoformat(due_date_raw.replace("Z", "+00:00"))
+            a.due_date = datetime.datetime.fromisoformat(
+                due_date_raw.replace("Z", "+00:00")
+            )
         except Exception:
-            # try fallback: if you want stricter validation, return 400 instead
-            return jsonify({"error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"}), 400 #ALL ABOVE IS NEW 11/19
-    
+            return (
+                jsonify(
+                    {
+                        "error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"
+                    }
+                ),
+                400,
+            )
+
     db.session.add(a)
     db.session.commit()
     return jsonify({"id": a.id, "name": a.name}), 201
-
+    
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
     try:
