@@ -1,20 +1,31 @@
 # pins.py
 
 from flask import Blueprint, request, jsonify
-from extensions import db          # matches your app.py pattern
-from models import Pin             # assumes Pin is defined in models.py
+from extensions import db  # same place app.py gets db from
 
 bp = Blueprint("pins", __name__)
 
-def pin_to_dict(pin):
-    """Serialize a Pin row to a simple dict."""
-    return {
-        "id": getattr(pin, "id", None),
-        "assignment_id": getattr(pin, "assignment_id", None),
-        "class_id": getattr(pin, "class_id", None),
-        "pin_code": getattr(pin, "pin_code", None),
-    }
+# ---------- MODEL ----------
 
+class Pin(db.Model):
+    __tablename__ = "pins"  # change if you use a different naming style
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Assumes you already have an Assignment model with table name "assignments" and PK "id"
+    assignment_id = db.Column(db.Integer, nullable=False)
+    class_id = db.Column(db.Integer, nullable=True)
+    pin_code = db.Column(db.String(32), unique=True, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "assignment_id": self.assignment_id,
+            "class_id": self.class_id,
+            "pin_code": self.pin_code,
+        }
+
+
+# ---------- ROUTES ----------
 
 @bp.route("/api/pins", methods=["POST"])
 def create_pin():
@@ -54,6 +65,11 @@ def create_pin():
     if not pin_code:
         return jsonify({"error": "pin_code is required"}), 400
 
+    # Optional: prevent duplicate pin codes
+    existing = Pin.query.filter_by(pin_code=pin_code).first()
+    if existing:
+        return jsonify({"error": "A PIN with this code already exists"}), 409
+
     # --- create and save Pin ---
     pin = Pin(
         assignment_id=assignment_id,
@@ -64,7 +80,7 @@ def create_pin():
     db.session.add(pin)
     db.session.commit()
 
-    return jsonify(pin_to_dict(pin)), 201
+    return jsonify(pin.to_dict()), 201
 
 
 @bp.route("/api/pins/<string:pin_code>", methods=["GET"])
@@ -78,4 +94,4 @@ def get_pin_by_code(pin_code):
     if not pin:
         return jsonify({"error": "PIN not found"}), 404
 
-    return jsonify(pin_to_dict(pin)), 200
+    return jsonify(pin.to_dict()), 200
