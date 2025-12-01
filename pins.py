@@ -30,9 +30,10 @@ class Pin(db.Model):
 # ---------- HELPERS ----------
 
 def generate_pin_code(length: int = 6) -> str:
-    """Generate a random alphanumeric PIN code."""
-    chars = string.ascii_uppercase + string.digits
-    return "".join(random.choice(chars) for _ in range(length))
+    """Generate a random numeric PIN code (e.g., 483920)."""
+    digits = string.digits  # "0123456789"
+    return "".join(random.choice(digits) for _ in range(length))
+
 
 
 # ---------- ROUTES ----------
