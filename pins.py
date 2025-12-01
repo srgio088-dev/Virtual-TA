@@ -1,7 +1,6 @@
-# pins.py
-
+# src/pins.py
 from flask import Blueprint, request, jsonify
-from extensions import db  # same place app.py gets db from
+from extensions import db
 import random
 import string
 
@@ -10,13 +9,12 @@ bp = Blueprint("pins", __name__)
 # ---------- MODEL ----------
 
 class Pin(db.Model):
-    __tablename__ = "pins"  # matches your existing table name
+    __tablename__ = "pins"  # assumes your table is named 'pins'
 
     id = db.Column(db.Integer, primary_key=True)
     assignment_id = db.Column(db.Integer, nullable=False)
     class_id = db.Column(db.Integer, nullable=True)
     pin_code = db.Column(db.String(32), unique=True, nullable=False)
-    # NOTE: your current DB table doesn't have student_id, so we are NOT storing it yet.
 
     def to_dict(self):
         return {
@@ -30,14 +28,11 @@ class Pin(db.Model):
 # ---------- HELPERS ----------
 
 def generate_pin_code(length: int = 6) -> str:
-    """Generate a random numeric PIN code (e.g., 483920)."""
-    import random
-    import string
-
+    """
+    Generate a random numeric PIN code, e.g. '483920'.
+    """
     digits = string.digits  # "0123456789"
     return "".join(random.choice(digits) for _ in range(length))
-
-
 
 
 # ---------- ROUTES ----------
@@ -47,21 +42,22 @@ def create_pin():
     """
     Create a new PIN for an assignment.
 
-    Frontend is currently sending JSON like:
+    Current frontend (AssignmentList.jsx) sends JSON like:
     {
       "class_id": 4850,
-      "assignment_id": 2,
-      "student_id": "Jed Cooper"
+      "assignment_id": 2
     }
 
-    This endpoint will:
-    - Read assignment_id and class_id
-    - Ignore student_id for now (DB schema doesn't have it yet)
-    - Auto-generate a pin_code if one is not provided
+    This endpoint:
+    - Validates assignment_id (required, int)
+    - Validates class_id (optional, int if present)
+    - Auto-generates a 6-digit numeric pin_code if none provided
+    - Returns: { id, assignment_id, class_id, pin_code }
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
-    # print("DEBUG /api/pins data:", data, flush=True)  # uncomment if you want to see payload in logs
+    # Debug if needed:
+    # print("DEBUG /api/pins payload:", data, flush=True)
 
     # --- assignment_id: required, must be an integer ---
     raw_assignment_id = data.get("assignment_id") or data.get("assignmentId")
@@ -76,25 +72,19 @@ def create_pin():
     # --- class_id: optional, integer if provided ---
     raw_class_id = data.get("class_id") or data.get("classId")
     class_id = None
-    if raw_class_id not in (None, ""):
+    if raw_class_id not in (None, "", []):
         try:
             class_id = int(raw_class_id)
         except (TypeError, ValueError):
             return jsonify({"error": "class_id must be an integer if provided"}), 400
-
-    # --- student_id: currently ignored (no column yet), but we accept it ---
-    student_id = data.get("student_id") or data.get("studentId")
-    # You can log it if you want:
-    # print("DEBUG student_id:", student_id, flush=True)
 
     # --- pin_code: optional string; auto-generate if missing ---
     raw_pin_code = data.get("pin_code") or data.get("pinCode")
     if raw_pin_code:
         pin_code = str(raw_pin_code).strip()
     else:
-        # Auto-generate a unique PIN
+        # Auto-generate a unique 6-digit numeric PIN
         pin_code = generate_pin_code()
-        # Ensure uniqueness
         while Pin.query.filter_by(pin_code=pin_code).first() is not None:
             pin_code = generate_pin_code()
 
@@ -105,8 +95,14 @@ def create_pin():
         pin_code=pin_code,
     )
 
-    db.session.add(pin)
-    db.session.commit()
+    try:
+        db.session.add(pin)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        # Log the full error on the server
+        print("ERROR creating PIN:", e, flush=True)
+        return jsonify({"error": "Internal error creating PIN"}), 500
 
     return jsonify(pin.to_dict()), 201
 
@@ -115,7 +111,6 @@ def create_pin():
 def get_pin_by_code(pin_code):
     """
     Look up a pin by its code.
-
     Used by the student PIN entry flow to find the assignment via PIN.
     """
     pin = Pin.query.filter_by(pin_code=pin_code).first()
