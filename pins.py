@@ -1,13 +1,13 @@
 # pins.py
 
 from flask import Blueprint, request, jsonify
-from app import db  # <- change this if your other files import db differently
-from models import Pin  # assumes Pin model is defined in models.py
+from extensions import db          # matches your app.py pattern
+from models import Pin             # assumes Pin is defined in models.py
 
 bp = Blueprint("pins", __name__)
 
 def pin_to_dict(pin):
-    """Safe serializer for Pin objects."""
+    """Serialize a Pin row to a simple dict."""
     return {
         "id": getattr(pin, "id", None),
         "assignment_id": getattr(pin, "assignment_id", None),
@@ -72,7 +72,7 @@ def get_pin_by_code(pin_code):
     """
     Look up a pin by its code.
 
-    Used by the student PIN entry flow if you want to fetch the assignment via PIN.
+    Used by the student PIN entry flow to find the assignment via PIN.
     """
     pin = Pin.query.filter_by(pin_code=pin_code).first()
     if not pin:
