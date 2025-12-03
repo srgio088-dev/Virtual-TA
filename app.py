@@ -353,7 +353,11 @@ def create_assignment():
 
     # Attach the assignment to the current user if we know who they are
     owner_email = get_request_email()
-
+    # NEW: if header/cookie didn’t provide it, fall back to JSON body
+    body_email = (data.get("owner_email") or "").strip()
+    if not owner_email and body_email:
+        owner_email = body_email
+        
     # Fallback: allow frontend to send owner_email explicitly in JSON
     body_email = (data.get("owner_email") or "").strip()
     if not owner_email and body_email:
