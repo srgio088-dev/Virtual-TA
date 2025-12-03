@@ -341,25 +341,40 @@ def get_assignments():
 
 @app.post("/api/assignments")
 def create_assignment():
-    data = request.get_json(force=True) or {}
+    """
+    Create a new assignment.
 
-    name = (data.get("name") or "").strip()
-    rubric_text = (data.get("rubric") or "") or None
-    rubric_id = data.get("rubric_id")
-    due_date_str = data.get("due_date")
+    Supports BOTH:
+    - JSON: application/json  (apiPostJSON)
+    - multipart/form-data     (FormData with rubric_file, etc.)
+    and will pick up owner_email from header, JSON, OR form.
+    """
+    # Try JSON first; if not JSON, fall back to form data
+    json_data = request.get_json(silent=True)
+    if json_data is not None:
+        src = json_data
+    else:
+        src = request.form
+
+    # Basic fields
+    name = (src.get("name") or "").strip()
+    rubric_text = (src.get("rubric") or "") or None
+    rubric_id = src.get("rubric_id")
+    due_date_str = src.get("due_date")
 
     if not name or (not rubric_text and not rubric_id):
-        return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
+        return (
+            jsonify(
+                {"error": "name and either rubric or rubric_id are required"}
+            ),
+            400,
+        )
 
-    # Attach the assignment to the current user if we know who they are
+    # 1) Try Netlify Identity header/cookie
     owner_email = get_request_email()
-    # NEW: if header/cookie didn’t provide it, fall back to JSON body
-    body_email = (data.get("owner_email") or "").strip()
-    if not owner_email and body_email:
-        owner_email = body_email
-        
-    # Fallback: allow frontend to send owner_email explicitly in JSON
-    body_email = (data.get("owner_email") or "").strip()
+
+    # 2) Fallback: JSON body or form field "owner_email"
+    body_email = (src.get("owner_email") or "").strip()
     if not owner_email and body_email:
         owner_email = body_email
 
@@ -379,7 +394,7 @@ def create_assignment():
         rubric=rubric_text.strip() if rubric_text else None,
         rubric_id=rubric_id,
         due_date=due_date,
-        owner_email=owner_email,  # <- may be None for “global” assignments
+        owner_email=owner_email or None,  # None = global assignment
     )
 
     db.session.add(a)
