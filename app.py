@@ -65,7 +65,7 @@ class Assignment(db.Model):
     name = db.Column(db.String(180), nullable=False)
     rubric = db.Column(db.Text, nullable=True)
     # NEW: which professor owns this assignment
-    owner_email = db.Column(db.String(255), nullable=True)
+    owner_email = db.Column(db.String(255), nullable=True, index=True)
     rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
     due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -142,11 +142,11 @@ def assignment_to_dict(a: Assignment):
     return {
         "id": a.id,
         "name": a.name,
-        "rubric": a.rubric,          # <— was a.rubric_text
+        "rubric": a.rubric_text,
         "rubric_id": a.rubric_id,
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "due_date": a.due_date.isoformat() if a.due_date else None,
-        "owner_email": a.owner_email,
+        "owner_email": getattr(a, "owner_email", None),
         "submissions": [submission_to_dict(s) for s in a.submissions],
         "submission_count": len(a.submissions),
     }
@@ -304,62 +304,51 @@ def delete_rubric(rid):
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    # May be None if user is not logged in or header missing
-    user_email = request.headers.get("X-User-Email")
+    # email set from Netlify Identity via cookie
+    email = request.cookies.get("vt_user_email")
 
-    q = Assignment.query.order_by(Assignment.created_at.desc())
+    q = Assignment.query
 
-    # If we have a user, show:
-    #   - assignments owned by them
-    #   - plus "global" assignments with no owner_email
-    if user_email:
-        q = q.filter(
-            or_(
-                Assignment.owner_email == user_email,
-                Assignment.owner_email.is_(None),
-                Assignment.owner_email == ""  # just in case
-            )
-        )
+    # Only filter if the model actually has the column
+    if email and hasattr(Assignment, "owner_email"):
+        q = q.filter(Assignment.owner_email == email)
 
-    items = q.all()
+    items = q.order_by(Assignment.created_at.desc()).all()
     return jsonify([assignment_to_dict(a) for a in items])
     
 @app.post("/api/assignments")
 def create_assignment():
-    data = request.get_json(force=True) or {}
-
-    name = (data.get("name") or "").strip()
-    rubric_text = (data.get("rubric") or "").strip() or None
-    rubric_id = data.get("rubric_id")
-    due_date_str = data.get("due_date")
-    count = int(data.get("count") or 1)
-
-    owner_email = request.headers.get("X-User-Email")
+    data = request.get_json(force=True)
+    name = (data or {}).get("name")
+    rubric_text = (data or {}).get("rubric")
+    rubric_id = (data or {}).get("rubric_id")
+    due_date_str = (data or {}).get("due_date")
 
     if not name or (not rubric_text and not rubric_id):
         return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
 
-    created = []
+    # NEW – who owns this assignment
+    owner_email = request.cookies.get("vt_user_email")
 
-    for i in range(count):
-        final_name = f"{name} {i+1}" if count > 1 else name
+    due_date = None
+    if due_date_str:
+        try:
+            # adjust format to whatever you send from the frontend
+            due_date = datetime.fromisoformat(due_date_str)
+        except ValueError:
+            return jsonify({"error": "Invalid due_date format"}), 400
 
-        a = Assignment(
-            name=final_name,
-            rubric=rubric_text,       # <— was rubric_text=...
-            rubric_id=rubric_id,
-            owner_email=owner_email,
-        )
+    a = Assignment(
+        name=name.strip(),
+        rubric_text=rubric_text.strip() if rubric_text else None,
+        rubric_id=rubric_id,
+        due_date=due_date,
+        owner_email=owner_email,
+    )
 
-        if due_date_str:
-            from datetime import datetime
-            a.due_date = datetime.fromisoformat(due_date_str)
-
-        db.session.add(a)
-        created.append(a)
-
+    db.session.add(a)
     db.session.commit()
-    return jsonify([assignment_to_dict(a) for a in created]), 201
+    return jsonify(assignment_to_dict(a)), 201
     
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
