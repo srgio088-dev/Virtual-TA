@@ -400,6 +400,8 @@ def get_assignment(aid):
 
 @app.get("/api/whoami")
 def whoami():
+    """Debug: see what email the backend thinks you are."""
+    from pprint import pformat
     return jsonify({
         "email": get_request_email(),
         "headers_seen": dict(request.headers),
