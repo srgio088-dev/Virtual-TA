@@ -142,11 +142,11 @@ def assignment_to_dict(a: Assignment):
     return {
         "id": a.id,
         "name": a.name,
-        "rubric": a.rubric_text,
+        "rubric": a.rubric,          # <— was a.rubric_text
         "rubric_id": a.rubric_id,
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "due_date": a.due_date.isoformat() if a.due_date else None,
-        "owner_email": a.owner_email,   # optional but handy for checking
+        "owner_email": a.owner_email,
         "submissions": [submission_to_dict(s) for s in a.submissions],
         "submission_count": len(a.submissions),
     }
@@ -330,11 +330,10 @@ def create_assignment():
 
     name = (data.get("name") or "").strip()
     rubric_text = (data.get("rubric") or "").strip() or None
-    rubric_id = data.get("rubric_id")  # optional
+    rubric_id = data.get("rubric_id")
     due_date_str = data.get("due_date")
     count = int(data.get("count") or 1)
 
-    # NEW: current user (might be None if someone hits endpoint without login)
     owner_email = request.headers.get("X-User-Email")
 
     if not name or (not rubric_text and not rubric_id):
@@ -343,16 +342,13 @@ def create_assignment():
     created = []
 
     for i in range(count):
-        if count > 1:
-            final_name = f"{name} {i+1}"
-        else:
-            final_name = name
+        final_name = f"{name} {i+1}" if count > 1 else name
 
         a = Assignment(
             name=final_name,
-            rubric_text=rubric_text,
+            rubric=rubric_text,       # <— was rubric_text=...
             rubric_id=rubric_id,
-            owner_email=owner_email,  # <<— key line
+            owner_email=owner_email,
         )
 
         if due_date_str:
