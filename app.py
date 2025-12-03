@@ -65,7 +65,7 @@ class Assignment(db.Model):
     name = db.Column(db.String(180), nullable=False)
     rubric = db.Column(db.Text, nullable=True)
     # NEW: which professor owns this assignment
-    owner_email = db.Column(db.String(255), nullable=True, index=True)
+    owner_email = db.Column(db.String(255), nullable=True)
     rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
     due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -138,21 +138,17 @@ def get_request_email() -> str | None:
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def assignment_to_dict(a: Assignment) -> dict:
-    if isinstance(a.due_date, datetime.datetime):
-        due = a.due_date.isoformat()
-    else:
-        due = None
+def assignment_to_dict(a: Assignment):
     return {
         "id": a.id,
         "name": a.name,
-        "rubric": a.rubric,
+        "rubric": a.rubric_text,
         "rubric_id": a.rubric_id,
-        "due_date": due, #NEW 11/19
-        "owner_email": a.owner_email,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "due_date": a.due_date.isoformat() if a.due_date else None,
+        "owner_email": a.owner_email,   # optional but handy for checking
+        "submissions": [submission_to_dict(s) for s in a.submissions],
         "submission_count": len(a.submissions),
-        "submissions": [s.to_dict_full() for s in a.submissions],
-        "created_at": a.created_at.isoformat(),
     }
 
 def infer_student_name(fname: str) -> str:
@@ -308,49 +304,61 @@ def delete_rubric(rid):
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    user_email = get_request_user_email()
+    # May be None if user is not logged in or header missing
+    user_email = request.headers.get("X-User-Email")
 
-    q = Assignment.query
+    q = Assignment.query.order_by(Assignment.created_at.desc())
 
-    # 👇 Only show assignments owned by this user when logged in
+    # If we have a user, show:
+    #   - assignments owned by them
+    #   - plus "global" assignments with no owner_email
     if user_email:
-        q = q.filter(Assignment.owner_email == user_email)
+        q = q.filter(
+            or_(
+                Assignment.owner_email == user_email,
+                Assignment.owner_email.is_(None),
+                Assignment.owner_email == ""  # just in case
+            )
+        )
 
-    items = q.order_by(Assignment.created_at.desc()).all()
+    items = q.all()
     return jsonify([assignment_to_dict(a) for a in items])
     
 @app.post("/api/assignments")
 def create_assignment():
     data = request.get_json(force=True) or {}
 
-    base_name = (data.get("name") or "").strip()
-    rubric_text = (data.get("rubric") or "").strip()
+    name = (data.get("name") or "").strip()
+    rubric_text = (data.get("rubric") or "").strip() or None
+    rubric_id = data.get("rubric_id")  # optional
+    due_date_str = data.get("due_date")
     count = int(data.get("count") or 1)
 
-    # due date handling if you already support it
-    due_date_str = data.get("due_date")  # e.g. "2025-12-21T23:59"
-    due_date = None
-    if due_date_str:
-        try:
-            due_date = datetime.fromisoformat(due_date_str)
-        except ValueError:
-            return jsonify({"error": "Invalid due_date"}), 400
+    # NEW: current user (might be None if someone hits endpoint without login)
+    owner_email = request.headers.get("X-User-Email")
 
-    if not base_name:
-        return jsonify({"error": "name is required"}), 400
-
-    # 👇 email of the currently logged-in professor
-    owner_email = get_request_user_email()
+    if not name or (not rubric_text and not rubric_id):
+        return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
 
     created = []
+
     for i in range(count):
-        name = base_name if count == 1 else f"{base_name} {i+1}"
+        if count > 1:
+            final_name = f"{name} {i+1}"
+        else:
+            final_name = name
+
         a = Assignment(
-            name=name,
-            rubric_text=rubric_text or None,
-            due_date=due_date,
-            owner_email=owner_email,   # 👈 tie to account
+            name=final_name,
+            rubric_text=rubric_text,
+            rubric_id=rubric_id,
+            owner_email=owner_email,  # <<— key line
         )
+
+        if due_date_str:
+            from datetime import datetime
+            a.due_date = datetime.fromisoformat(due_date_str)
+
         db.session.add(a)
         created.append(a)
 
