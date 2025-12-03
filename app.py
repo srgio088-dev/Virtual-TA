@@ -122,6 +122,15 @@ with app.app_context():
 # =========================
 ALLOWED_EXTENSIONS = {"txt", "pdf", "docx"}
 
+def get_request_email() -> str | None:
+    """
+    Lightweight way to know 'who' is calling without full JWT auth.
+
+    The frontend will send the logged-in Netlify Identity user's email
+    as the X-User-Email header on each request.
+    """
+    return request.headers.get("X-User-Email")
+    
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -284,7 +293,24 @@ def delete_rubric(rid):
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    items = Assignment.query.order_by(Assignment.created_at.desc()).all()
+    """
+    Return assignments owned by the current user (if provided).
+
+    If X-User-Email is present, we only return assignments where
+    Assignment.owner_email matches that email. If no header is sent,
+    we currently return an empty list to avoid leaking other users'
+    data.
+    """
+    email = get_request_email()
+
+    q = Assignment.query
+    if email:
+        q = q.filter(Assignment.owner_email == email)
+    else:
+        # Not logged in / no email -> no assignments (frontend shows empty list)
+        return jsonify([])
+
+    items = q.order_by(Assignment.created_at.desc()).all()
     return jsonify([assignment_to_dict(a) for a in items])
 
 @app.post("/api/assignments")
@@ -295,8 +321,12 @@ def create_assignment():
     Supports:
       - JSON (existing behavior), or
       - multipart/form-data with an uploaded rubric_file (PDF/DOCX/TXT).
+
+    The assignment is tagged with the calling user's email (X-User-Email)
+    in Assignment.owner_email so we can scope assignments per user.
     """
     content_type = request.content_type or ""
+    owner_email = get_request_email()  # <--- who is creating this?
 
     # ---- multipart/form-data path (rubric_file upload) ----
     if content_type.startswith("multipart/form-data"):
@@ -329,6 +359,11 @@ def create_assignment():
         )
 
     a = Assignment(name=name)
+
+    # NEW: tag with owner email if we have one
+    if owner_email:
+        a.owner_email = owner_email
+
     if rubric_text:
         a.rubric = rubric_text
     if rubric_id:
