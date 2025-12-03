@@ -481,11 +481,14 @@ def upload_submissions():
     multipart/form-data:
       - assignment_id
       - files (multiple)
-    Student name inferred from filename.
+
+    Expected filename format:
+      SubmissionName_YourName.ext
     """
     assignment_id = request.form.get("assignment_id")
     if not assignment_id:
         return jsonify({"error": "assignment_id is required"}), 400
+
     files = request.files.getlist("files")
     if not files:
         return jsonify({"error": "files[] are required"}), 400
@@ -497,20 +500,27 @@ def upload_submissions():
     for f in files:
         if not f or not allowed_file(f.filename):
             continue
+
         safe_name = secure_filename(f.filename)
         dest = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
         f.save(dest)
 
+        # 🔍 Use the new parser on the ORIGINAL filename
+        submission_title, student_name = parse_submission_filename(f.filename or safe_name)
+        if not student_name:
+            # Fallback so we never blow up
+            student_name = "Unknown Student"
+
         s = Submission(
-            student_name=infer_student_name(safe_name),
+            student_name=student_name,
             assignment_id=int(assignment_id),
             file_path=dest,
         )
         db.session.add(s)
-        db.session.flush()  # to get s.id
+        db.session.flush()
         created_ids.append(s.id)
 
-        # OPTIONAL: auto-grade each file; comment out if you want to defer
+        # Auto-grade
         sub_text = extract_text(dest)
         feedback, grade = grade_with_openai(sub_text, rubric_text or "No rubric provided")
         s.ai_feedback = feedback
@@ -518,6 +528,7 @@ def upload_submissions():
 
     db.session.commit()
     return jsonify({"created_ids": created_ids}), 201
+
 
 # ----- Submissions: read / finalize / delete -----
 @app.get("/api/submissions/<int:sid>")
