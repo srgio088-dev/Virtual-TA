@@ -10,9 +10,8 @@ from werkzeug.utils import secure_filename
 from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
-from flask_migrate import Migrate 
+from flask_migrate import Migrate
 from filename_utils import parse_submission_filename  # Edit 12-3
-
 
 
 # =========================
@@ -56,6 +55,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 from pins import bp as pins_bp
 app.register_blueprint(pins_bp)
 
+
 # =========================
 # Models
 # =========================
@@ -64,10 +64,10 @@ class Assignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(180), nullable=False)
     rubric = db.Column(db.Text, nullable=True)
-    # NEW: which professor owns this assignment
+    # which professor owns this assignment
     owner_email = db.Column(db.String(255), nullable=True, index=True)
     rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
-    due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
+    due_date = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     submissions = db.relationship(
         "Submission",
@@ -75,6 +75,7 @@ class Assignment(db.Model):
         cascade="all, delete-orphan",
         lazy=True,
     )
+
 
 class Submission(db.Model):
     __tablename__ = "submissions"
@@ -86,10 +87,6 @@ class Submission(db.Model):
     ai_grade = db.Column(db.String(20))
     final_grade = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
-
-    def get_request_user_email():
-        # Netlify Identity email we’re passing from the frontend
-        return request.headers.get("X-User-Email")
 
     def to_dict_short(self):
         return {
@@ -112,44 +109,46 @@ class Submission(db.Model):
             "created_at": self.created_at.isoformat(),
         }
 
+
 class Rubric(db.Model):
     # default __tablename__ will be "rubric" (lowercased class name)
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True)
     body = db.Column(db.Text, nullable=False)  # the rubric text
 
+
 with app.app_context():
     db.create_all()
+
 
 # =========================
 # Helpers
 # =========================
 ALLOWED_EXTENSIONS = {"txt", "pdf", "docx"}
 
-def get_request_email() -> str | None:
-    """
-    Lightweight way to know 'who' is calling without full JWT auth.
 
-    The frontend will send the logged-in Netlify Identity user's email
-    as the X-User-Email header on each request.
-    """
-    return request.headers.get("X-User-Email")
-    
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 def assignment_to_dict(a: Assignment):
+    """
+    Safe serializer for Assignment. Uses the real rubric column and
+    Submission.to_dict_short(), fixing the previous NameError.
+    """
+    rubric_value = getattr(a, "rubric", None) or getattr(a, "rubric_text", None)
     return {
         "id": a.id,
         "name": a.name,
-        "rubric": a.rubric_text,
+        "rubric": rubric_value,
         "rubric_id": a.rubric_id,
         "created_at": a.created_at.isoformat() if a.created_at else None,
         "due_date": a.due_date.isoformat() if a.due_date else None,
         "owner_email": getattr(a, "owner_email", None),
-        "submissions": [submission_to_dict(s) for s in a.submissions],
+        "submissions": [s.to_dict_short() for s in a.submissions],
         "submission_count": len(a.submissions),
     }
+
 
 def infer_student_name(fname: str) -> str:
     base = Path(fname).stem
@@ -157,6 +156,7 @@ def infer_student_name(fname: str) -> str:
     if len(parts) >= 2:
         return f"{parts[0]} {parts[1]}"
     return base
+
 
 def extract_text(file_path: str) -> str:
     ext = file_path.rsplit(".", 1)[1].lower()
@@ -174,6 +174,7 @@ def extract_text(file_path: str) -> str:
         doc = Document(file_path)
         return "\n".join(p.text for p in doc.paragraphs)
     return ""
+
 
 def extract_rubric_from_upload(file_storage):
     """
@@ -206,15 +207,17 @@ def extract_rubric_from_upload(file_storage):
     except UnicodeDecodeError:
         return data.decode("latin-1", errors="ignore").strip()
 
+
 def get_request_email():
     """
     Get the logged-in user's email from headers or cookie.
-    Frontend sends X-User-Email on every request.
+    Frontend sends X-User-Email and we also store vt_user_email as a cookie.
     """
     email = request.headers.get("X-User-Email")
     if not email:
-        email = request.cookies.get("user_email")
+        email = request.cookies.get("vt_user_email") or request.cookies.get("user_email")
     return email
+
 
 def grade_with_openai(submission_text: str, rubric_text: str) -> tuple[str, str]:
     """
@@ -261,6 +264,7 @@ Return a JSON object with:
         # e.g., 429 insufficient_quota; keep app usable
         return f"[AI error or parse issue] {e}", "Pending"
 
+
 # =========================
 # Routes
 # =========================
@@ -270,11 +274,13 @@ Return a JSON object with:
 def health():
     return jsonify({"ok": True, "time": datetime.datetime.utcnow().isoformat()})
 
+
 # ----- Rubrics -----
 @app.get("/api/rubrics")
 def list_rubrics():
     items = Rubric.query.order_by(Rubric.name.asc()).all()
     return jsonify([{"id": r.id, "name": r.name, "body": r.body} for r in items])
+
 
 @app.post("/api/rubrics")
 def create_rubric():
@@ -287,6 +293,7 @@ def create_rubric():
     db.session.add(r)
     db.session.commit()
     return jsonify({"id": r.id, "name": r.name}), 201
+
 
 @app.delete("/api/rubrics/<int:rid>")
 def delete_rubric(rid):
@@ -301,21 +308,22 @@ def delete_rubric(rid):
     db.session.commit()
     return jsonify({"ok": True})
 
+
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    # email set from Netlify Identity via cookie
+    """
+    Return assignments. If vt_user_email cookie is set, only return that user's
+    assignments; otherwise return all (useful for local testing).
+    """
     email = request.cookies.get("vt_user_email")
-
     q = Assignment.query
-
-    # Only filter if the model actually has the column
     if email and hasattr(Assignment, "owner_email"):
         q = q.filter(Assignment.owner_email == email)
-
     items = q.order_by(Assignment.created_at.desc()).all()
     return jsonify([assignment_to_dict(a) for a in items])
-    
+
+
 @app.post("/api/assignments")
 def create_assignment():
     data = request.get_json(force=True)
@@ -327,20 +335,22 @@ def create_assignment():
     if not name or (not rubric_text and not rubric_id):
         return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
 
-    # NEW – who owns this assignment
+    # who owns this assignment
     owner_email = request.cookies.get("vt_user_email")
 
     due_date = None
     if due_date_str:
         try:
-            # adjust format to whatever you send from the frontend
-            due_date = datetime.fromisoformat(due_date_str)
+            # Accept ISO timestamps, allow trailing Z
+            due_date = datetime.datetime.fromisoformat(
+                due_date_str.replace("Z", "+00:00")
+            )
         except ValueError:
             return jsonify({"error": "Invalid due_date format"}), 400
 
     a = Assignment(
         name=name.strip(),
-        rubric_text=rubric_text.strip() if rubric_text else None,
+        rubric=rubric_text.strip() if rubric_text else None,
         rubric_id=rubric_id,
         due_date=due_date,
         owner_email=owner_email,
@@ -349,18 +359,18 @@ def create_assignment():
     db.session.add(a)
     db.session.commit()
     return jsonify(assignment_to_dict(a)), 201
-    
+
+
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
     try:
         # Prefer session.get (SQLAlchemy 2.x) but fallback to query.get if needed
-        a = getattr(db.session, "get", None)
-        a = a(Assignment, aid) if a else Assignment.query.get(aid)
+        getter = getattr(db.session, "get", None)
+        a = getter(Assignment, aid) if getter else Assignment.query.get(aid)
 
         if not a:
             return jsonify({"error": "assignment not found"}), 404
 
-        # Be flexible about the rubric field name
         rubric_value = getattr(a, "rubric", None) or getattr(a, "rubric_text", None)
 
         return jsonify({
@@ -369,27 +379,9 @@ def get_assignment(aid):
             "rubric": rubric_value
         })
     except Exception as e:
-        # Log full stacktrace to Gunicorn error log
         app.logger.exception("GET /api/assignments/%s failed", aid)
         return jsonify({"error": "internal", "detail": str(e)}), 500
-# =================================================
-#    OLD CODE 11/19
 
-#@app.patch("/api/assignments/<int:aid>")
-#def update_assignment(aid):
-#    a = Assignment.query.get(aid)
-#    if not a:
-#        return jsonify({"error": "assignment not found"}), 404
-#    data = request.get_json(force=True)
-#    if "name" in data:
-#        a.name = (data["name"] or "").strip()
-#    if "rubric" in data:
-#        a.rubric = (data["rubric"] or "").strip()
-#    if "rubric_id" in data:
-#        a.rubric_id = int(data["rubric_id"]) if data["rubric_id"] is not None else None
-#    db.session.commit()
-#   return jsonify({"ok": True})
-#==================================================
 
 @app.patch("/api/assignments/<int:aid>")
 def update_assignment(aid):
@@ -404,16 +396,20 @@ def update_assignment(aid):
     if "rubric_id" in data:
         a.rubric_id = int(data["rubric_id"]) if data["rubric_id"] is not None else None
 
-    # NEW: due_date handling
+    # due_date handling
     if "due_date" in data:
         raw = data["due_date"]
         if raw is None or raw == "":
             a.due_date = None
         else:
             try:
-                a.due_date = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                a.due_date = datetime.datetime.fromisoformat(
+                    raw.replace("Z", "+00:00")
+                )
             except Exception:
-                return jsonify({"error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"}), 400
+                return jsonify({
+                    "error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"
+                }), 400
 
     db.session.commit()
     return jsonify({"ok": True})
@@ -427,6 +423,7 @@ def delete_assignment(aid):
     db.session.delete(a)
     db.session.commit()
     return jsonify({"ok": True})
+
 
 # ----- Submissions: single upload -----
 @app.post("/api/upload_submission")
@@ -470,6 +467,7 @@ def upload_submission():
     db.session.commit()
     return jsonify({"id": s.id, "message": "uploaded and graded"}), 201
 
+
 # ----- Submissions: multi upload (drag & drop many) -----
 @app.post("/api/upload_submissions")
 def upload_submissions():
@@ -501,10 +499,9 @@ def upload_submissions():
         dest = os.path.join(app.config["UPLOAD_FOLDER"], safe_name)
         f.save(dest)
 
-        # 🔍 Use the new parser on the ORIGINAL filename
+        # Use the parser on the ORIGINAL filename
         submission_title, student_name = parse_submission_filename(f.filename or safe_name)
         if not student_name:
-            # Fallback so we never blow up
             student_name = "Unknown Student"
 
         s = Submission(
@@ -516,7 +513,6 @@ def upload_submissions():
         db.session.flush()
         created_ids.append(s.id)
 
-        # Auto-grade
         sub_text = extract_text(dest)
         feedback, grade = grade_with_openai(sub_text, rubric_text or "No rubric provided")
         s.ai_feedback = feedback
@@ -532,6 +528,7 @@ def get_submission(sid):
     s = Submission.query.get_or_404(sid)
     return jsonify(s.to_dict_full())
 
+
 @app.post("/api/submissions/<int:sid>/finalize")
 def finalize_submission(sid):
     s = Submission.query.get_or_404(sid)
@@ -543,12 +540,14 @@ def finalize_submission(sid):
     db.session.commit()
     return jsonify({"ok": True})
 
+
 @app.delete("/api/submissions/<int:sid>")
 def delete_submission(sid):
     s = Submission.query.get_or_404(sid)
     db.session.delete(s)
     db.session.commit()
     return jsonify({"ok": True})
+
 
 # =========================
 # Entrypoint
