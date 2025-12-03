@@ -1,8 +1,8 @@
 import os, json, datetime
 from pathlib import Path
-
+from sqlalchemy import or_
 from auth import require_professor
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from extensions import db              # ✅ shared SQLAlchemy instance
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -65,7 +65,7 @@ class Assignment(db.Model):
     name = db.Column(db.String(180), nullable=False)
     rubric = db.Column(db.Text, nullable=True)
     # NEW: which professor owns this assignment
-    owner_email = db.Column(db.String, nullable=True)
+    owner_email = db.Column(db.String(255), nullable=True, index=True)
     rubric_id = db.Column(db.Integer, db.ForeignKey("rubric.id"), nullable=True)
     due_date = db.Column(db.DateTime, nullable=True) #NEW 11/19
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -145,6 +145,7 @@ def assignment_to_dict(a: Assignment) -> dict:
         "rubric": a.rubric,
         "rubric_id": a.rubric_id,
         "due_date": due, #NEW 11/19
+        "owner_email": a.owner_email,
         "submission_count": len(a.submissions),
         "submissions": [s.to_dict_full() for s in a.submissions],
         "created_at": a.created_at.isoformat(),
@@ -204,6 +205,16 @@ def extract_rubric_from_upload(file_storage):
         return data.decode("utf-8").strip()
     except UnicodeDecodeError:
         return data.decode("latin-1", errors="ignore").strip()
+
+def get_request_email():
+    """
+    Get the logged-in user's email from headers or cookie.
+    Frontend sends X-User-Email on every request.
+    """
+    email = request.headers.get("X-User-Email")
+    if not email:
+        email = request.cookies.get("user_email")
+    return email
 
 def grade_with_openai(submission_text: str, rubric_text: str) -> tuple[str, str]:
     """
@@ -294,100 +305,60 @@ def delete_rubric(rid):
 @app.get("/api/assignments")
 def get_assignments():
     """
-    Return assignments owned by the current user (if provided).
-
-    If X-User-Email is present, we only return assignments where
-    Assignment.owner_email matches that email. If no header is sent,
-    we currently return an empty list to avoid leaking other users'
-    data.
+    If a user is logged in (email present) we show:
+      - assignments they own
+      - plus any 'global' assignments with owner_email IS NULL
+    If no email is present (not logged in), we show all assignments.
     """
     email = get_request_email()
 
     q = Assignment.query
+
     if email:
-        q = q.filter(Assignment.owner_email == email)
-    else:
-        # Not logged in / no email -> no assignments (frontend shows empty list)
-        return jsonify([])
+        q = q.filter(
+            or_(
+                Assignment.owner_email == email,
+                Assignment.owner_email.is_(None),
+            )
+        )
 
     items = q.order_by(Assignment.created_at.desc()).all()
     return jsonify([assignment_to_dict(a) for a in items])
-
+    
 @app.post("/api/assignments")
 def create_assignment():
-    """
-    Create a single assignment.
+    data = request.get_json(force=True) or {}
 
-    Supports:
-      - JSON (existing behavior), or
-      - multipart/form-data with an uploaded rubric_file (PDF/DOCX/TXT).
+    name = (data.get("name") or "").strip()
+    rubric_text = (data.get("rubric") or "").strip()
+    due_date_str = (data.get("due_date") or "").strip()
 
-    The assignment is tagged with the calling user's email (X-User-Email)
-    in Assignment.owner_email so we can scope assignments per user.
-    """
-    content_type = request.content_type or ""
-    owner_email = get_request_email()  # <--- who is creating this?
+    if not name:
+        return jsonify({"error": "name is required"}), 400
 
-    # ---- multipart/form-data path (rubric_file upload) ----
-    if content_type.startswith("multipart/form-data"):
-        form = request.form
-        name = (form.get("name") or "").strip()
-        rubric_text = (form.get("rubric") or "").strip()
-        rubric_id = form.get("rubric_id")
-        due_date_raw = form.get("due_date")
+    # who owns this assignment?
+    owner_email = get_request_email()
 
-        rubric_file = request.files.get("rubric_file")
-        # If no text rubric provided, try to read from uploaded file
-        if rubric_file and not rubric_text:
-            rubric_text = extract_rubric_from_upload(rubric_file)
-
-    # ---- JSON path (no file) ----
-    else:
-        data = request.get_json(force=True) or {}
-        name = (data.get("name") or "").strip()
-        rubric_text = (data.get("rubric") or "").strip()
-        rubric_id = data.get("rubric_id")
-        due_date_raw = data.get("due_date")
-
-    # Basic validation
-    if not name or (not rubric_text and not rubric_id):
-        return (
-            jsonify(
-                {"error": "name and either rubric (text/file) or rubric_id are required"}
-            ),
-            400,
-        )
-
-    a = Assignment(name=name)
-
-    # NEW: tag with owner email if we have one
-    if owner_email:
-        a.owner_email = owner_email
-
-    if rubric_text:
-        a.rubric = rubric_text
-    if rubric_id:
-        a.rubric_id = int(rubric_id)
-
-    # Due date (same behavior as before)
-    if due_date_raw:
+    # parse due date if you support it
+    dt = None
+    if due_date_str:
         try:
-            a.due_date = datetime.datetime.fromisoformat(
-                due_date_raw.replace("Z", "+00:00")
-            )
+            from datetime import datetime
+            dt = datetime.fromisoformat(due_date_str)
         except Exception:
-            return (
-                jsonify(
-                    {
-                        "error": "due_date must be ISO format (e.g. 2025-11-19T13:00)"
-                    }
-                ),
-                400,
-            )
+            return jsonify({"error": "Invalid due_date format"}), 400
+
+    a = Assignment(
+        name=name,
+        rubric=rubric_text or None,
+        due_date=dt,
+        owner_email=owner_email,  # may be None → “global” assignment
+    )
 
     db.session.add(a)
     db.session.commit()
-    return jsonify({"id": a.id, "name": a.name}), 201
+
+    return jsonify(assignment_to_dict(a)), 201
     
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
