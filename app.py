@@ -398,6 +398,12 @@ def get_assignment(aid):
         app.logger.exception("GET /api/assignments/%s failed", aid)
         return jsonify({"error": "internal", "detail": str(e)}), 500
 
+@app.get("/api/whoami")
+def whoami():
+    return jsonify({
+        "email": get_request_email(),
+        "headers_seen": dict(request.headers),
+    })
 
 @app.patch("/api/assignments/<int:aid>")
 def update_assignment(aid):
