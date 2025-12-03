@@ -208,16 +208,15 @@ def extract_rubric_from_upload(file_storage):
         return data.decode("latin-1", errors="ignore").strip()
 
 
-def get_request_email():
+def get_request_email() -> str | None:
     """
-    Get the logged-in user's email from headers or cookie.
-    Frontend sends X-User-Email and we also store vt_user_email as a cookie.
+    Get the current user's email from the X-User-Email header that the
+    Netlify frontend sends. Returns a lower-cased email or None.
     """
     email = request.headers.get("X-User-Email")
-    if not email:
-        email = request.cookies.get("vt_user_email") or request.cookies.get("user_email")
-    return email
-
+    if email:
+        return email.strip().lower()
+    return None
 
 def grade_with_openai(submission_text: str, rubric_text: str) -> tuple[str, str]:
     """
@@ -312,17 +311,20 @@ def delete_rubric(rid):
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    """
-    Return assignments. If vt_user_email cookie is set, only return that user's
-    assignments; otherwise return all (useful for local testing).
-    """
-    email = request.cookies.get("vt_user_email")
-    q = Assignment.query
-    if email and hasattr(Assignment, "owner_email"):
-        q = q.filter(Assignment.owner_email == email)
-    items = q.order_by(Assignment.created_at.desc()).all()
-    return jsonify([assignment_to_dict(a) for a in items])
+    # Email of the logged-in Netlify Identity user
+    email = get_request_email()
 
+    # If not logged in, don't show any assignments
+    if not email:
+        return jsonify([])
+
+    items = (
+        Assignment.query
+        .filter(Assignment.owner_email == email)
+        .order_by(Assignment.created_at.desc())
+        .all()
+    )
+    return jsonify([assignment_to_dict(a) for a in items])
 
 @app.post("/api/assignments")
 def create_assignment():
@@ -332,11 +334,14 @@ def create_assignment():
     rubric_id = (data or {}).get("rubric_id")
     due_date_str = (data or {}).get("due_date")
 
+    # Email from Netlify Identity via X-User-Email header
+    owner_email = get_request_email()
+
+    if not owner_email:
+        return jsonify({"error": "Not authenticated"}), 401
+
     if not name or (not rubric_text and not rubric_id):
         return jsonify({"error": "name and either rubric or rubric_id are required"}), 400
-
-    # who owns this assignment
-    owner_email = request.cookies.get("vt_user_email")
 
     due_date = None
     if due_date_str:
@@ -353,13 +358,12 @@ def create_assignment():
         rubric=rubric_text.strip() if rubric_text else None,
         rubric_id=rubric_id,
         due_date=due_date,
-        owner_email=owner_email,
+        owner_email=owner_email,   # ✅ use header-based email
     )
 
     db.session.add(a)
     db.session.commit()
     return jsonify(assignment_to_dict(a)), 201
-
 
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
