@@ -87,6 +87,10 @@ class Submission(db.Model):
     final_grade = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
+    def get_request_user_email():
+        # Netlify Identity email we’re passing from the frontend
+        return request.headers.get("X-User-Email")
+
     def to_dict_short(self):
         return {
             "id": self.id,
@@ -304,23 +308,13 @@ def delete_rubric(rid):
 # ----- Assignments -----
 @app.get("/api/assignments")
 def get_assignments():
-    """
-    If a user is logged in (email present) we show:
-      - assignments they own
-      - plus any 'global' assignments with owner_email IS NULL
-    If no email is present (not logged in), we show all assignments.
-    """
-    email = get_request_email()
+    user_email = get_request_user_email()
 
     q = Assignment.query
 
-    if email:
-        q = q.filter(
-            or_(
-                Assignment.owner_email == email,
-                Assignment.owner_email.is_(None),
-            )
-        )
+    # 👇 Only show assignments owned by this user when logged in
+    if user_email:
+        q = q.filter(Assignment.owner_email == user_email)
 
     items = q.order_by(Assignment.created_at.desc()).all()
     return jsonify([assignment_to_dict(a) for a in items])
@@ -329,36 +323,39 @@ def get_assignments():
 def create_assignment():
     data = request.get_json(force=True) or {}
 
-    name = (data.get("name") or "").strip()
+    base_name = (data.get("name") or "").strip()
     rubric_text = (data.get("rubric") or "").strip()
-    due_date_str = (data.get("due_date") or "").strip()
+    count = int(data.get("count") or 1)
 
-    if not name:
-        return jsonify({"error": "name is required"}), 400
-
-    # who owns this assignment?
-    owner_email = get_request_email()
-
-    # parse due date if you support it
-    dt = None
+    # due date handling if you already support it
+    due_date_str = data.get("due_date")  # e.g. "2025-12-21T23:59"
+    due_date = None
     if due_date_str:
         try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(due_date_str)
-        except Exception:
-            return jsonify({"error": "Invalid due_date format"}), 400
+            due_date = datetime.fromisoformat(due_date_str)
+        except ValueError:
+            return jsonify({"error": "Invalid due_date"}), 400
 
-    a = Assignment(
-        name=name,
-        rubric=rubric_text or None,
-        due_date=dt,
-        owner_email=owner_email,  # may be None → “global” assignment
-    )
+    if not base_name:
+        return jsonify({"error": "name is required"}), 400
 
-    db.session.add(a)
+    # 👇 email of the currently logged-in professor
+    owner_email = get_request_user_email()
+
+    created = []
+    for i in range(count):
+        name = base_name if count == 1 else f"{base_name} {i+1}"
+        a = Assignment(
+            name=name,
+            rubric_text=rubric_text or None,
+            due_date=due_date,
+            owner_email=owner_email,   # 👈 tie to account
+        )
+        db.session.add(a)
+        created.append(a)
+
     db.session.commit()
-
-    return jsonify(assignment_to_dict(a)), 201
+    return jsonify([assignment_to_dict(a) for a in created]), 201
     
 @app.get("/api/assignments/<int:aid>")
 def get_assignment(aid):
