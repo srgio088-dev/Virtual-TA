@@ -11,6 +11,8 @@ from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document  # python-docx
 from flask_migrate import Migrate 
+from filename_utils import parse_submission_filename  # Edit 12-3
+
 
 
 # =========================
