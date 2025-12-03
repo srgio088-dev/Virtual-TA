@@ -472,18 +472,22 @@ def delete_assignment(aid):
 def upload_submission():
     """
     multipart/form-data:
-      - student_name
-      - assignment_id
-      - file (txt/pdf/docx)
+      - assignment_id  (required)
+      - file           (required, txt/pdf/docx)
+      - student_name   (optional; if missing, inferred from filename)
     """
-    student_name = (request.form.get("student_name") or "").strip()
+    raw_student_name = (request.form.get("student_name") or "").strip()
     assignment_id = request.form.get("assignment_id")
     f = request.files.get("file")
 
-    if not student_name or not assignment_id or not f:
-        return jsonify({"error": "student_name, assignment_id and file are required"}), 400
+    if not assignment_id or not f:
+        return jsonify({"error": "assignment_id and file are required"}), 400
     if not allowed_file(f.filename):
         return jsonify({"error": "Invalid file type. Allowed: txt, pdf, docx"}), 400
+
+    # Infer student name from the original filename if not provided
+    _submission_title, inferred_student = parse_submission_filename(f.filename or "")
+    student_name = raw_student_name or inferred_student or "Unknown Student"
 
     # Save file
     safe_name = secure_filename(f.filename)
@@ -507,7 +511,7 @@ def upload_submission():
     s.ai_grade = grade
 
     db.session.commit()
-    return jsonify({"id": s.id, "message": "uploaded and graded"}), 201
+    return jsonify({"id": s.id, "message": "uploaded and graded", "student_name": s.student_name}), 201
 
 # ----- Submissions: multi upload (drag & drop many) -----
 @app.post("/api/upload_submissions")
