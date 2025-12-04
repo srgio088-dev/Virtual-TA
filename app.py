@@ -524,8 +524,9 @@ def upload_submissions():
       - assignment_id
       - files (multiple)
 
-    Expected filename format:
-      SubmissionName_YourName.ext
+    Filename rule:
+      - If name has "_" or "-" then student_name = everything after the LAST one
+      - If it has neither, student_name = "" (blank)
     """
     assignment_id = request.form.get("assignment_id")
     if not assignment_id:
@@ -549,10 +550,11 @@ def upload_submissions():
 
         # Use the parser on the ORIGINAL filename
         submission_title, student_name = parse_submission_filename(f.filename or safe_name)
-        # If no underscore or dash was found → student_name should be blank
-        if student_name is None:
-            student_name = ""
-            
+
+        # Normalize according to your rule:
+        # - When there is no "_" or "-" → parser returns (None, None) → student_name becomes ""
+        # - When it works → strip whitespace like " Jed Cooper " → "Jed Cooper"
+        student_name = (student_name or "").strip()
 
         s = Submission(
             student_name=student_name,
