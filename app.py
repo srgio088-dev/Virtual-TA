@@ -549,8 +549,10 @@ def upload_submissions():
 
         # Use the parser on the ORIGINAL filename
         submission_title, student_name = parse_submission_filename(f.filename or safe_name)
-        if not student_name:
-            student_name = "Unknown Student"
+        # If no underscore or dash was found → student_name should be blank
+        if student_name is None:
+            student_name = ""
+            
 
         s = Submission(
             student_name=student_name,
