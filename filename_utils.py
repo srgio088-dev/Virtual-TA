@@ -1,33 +1,28 @@
 import os
+import re
 
-def parse_submission_filename(original_name: str):
+def parse_submission_filename(filename):
     """
-    Expected format (no extension):
-        SubmissionName_YourName
-
-    Examples:
-        'Discussion Post 1_Jed Cooper.docx'
-        'Lab1_JedCooper.pdf'
-
-    We treat EVERYTHING before the last "_" as the submission name,
-    and EVERYTHING after it as the student name.
+    Extract assignment_name and student_name from a filename.
+    Splits only on the LAST underscore or dash. Spaces are allowed.
+    Example accepted formats:
+        AssignmentName_Student_Name.docx
+        Assignment Name-Student-Name.pdf
     """
-    # Just the file name, no directories
-    base = os.path.basename(original_name)
+    name, _ = os.path.splitext(filename)
 
-    # Drop extension
-    base, _ = os.path.splitext(base)
+    # Look for last underscore or dash
+    match = re.search(r"[_-](?=[^_-]+$)", name)
+    if not match:
+        return None, None  # No valid delimiter found
 
-    # If there is at least one underscore, split on the LAST one
-    if "_" in base:
-        submission_part, student_part = base.rsplit("_", 1)
+    split_index = match.start()
 
-        # Clean up spaces/underscores in student name
-        student_clean = student_part.replace("_", " ").strip()
-        submission_clean = submission_part.strip()
+    assignment_raw = name[:split_index]
+    student_raw = name[split_index + 1:]
 
-        return submission_clean, student_clean
+    # Clean up whitespace but DO NOT remove internal spaces
+    assignment = assignment_raw.strip()
+    student = student_raw.strip()
 
-    # Fallback: no underscore; we can't separate, so treat entire
-    # stem as submission name and leave student blank
-    return base, ""
+    return assignment, student
